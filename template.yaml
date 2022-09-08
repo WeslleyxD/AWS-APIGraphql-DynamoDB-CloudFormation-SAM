@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  appsync-authentication
+
+Parameters:
+  Region:
+    Type: String
+    Default: us-west-2
+    Description: Region-Name
+
+Resources:
+  #ROLE AppsyncAuthentication
+  AppsyncAuthenticationDynamoDBRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: dynamodb-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: 
+                  - !GetAtt StudentsTable.Arn
+
+  #APPSYNC
+  AppsyncAuthentication:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      AuthenticationType: API_KEY
+      Name: TestAPI
+
+  AppsyncAuthenticationApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties: 
+      ApiId: !GetAtt AppsyncAuthentication.ApiId
+      Description: ApiKey do TestAPI
+  
+  AppsyncAuthenticationDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppsyncAuthentication.ApiId
+      Name: !Ref StudentsTable
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt AppsyncAuthenticationDynamoDBRole.Arn
+      DynamoDBConfig:
+        AwsRegion: !Ref Region
+        TableName: !Ref StudentsTable
+
+  AppsyncAuthenticationSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties: 
+      ApiId: !GetAtt AppsyncAuthentication.ApiId
+      Definition: |
+        type Query {
+          getStudent(ID: String!, Email: String!): Student
+          listStudents(limit: Int): StudentConnection
+        }
+        type Student {
+          Email: String!
+          ID: String!
+        }
+        type StudentConnection {
+          items: [Student]
+          nextToken: String
+        }
+        schema {
+          query: Query
+        }
+
+  AppsyncAuthenticationResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt AppsyncAuthentication.ApiId
+      TypeName: Query
+      FieldName: getStudent
+      DataSourceName: !GetAtt AppsyncAuthenticationDataSource.Name
+
+  # TODO: CONTINUAR NO REQUESTMAPPINGTEMPLATE XDDDDD
+
+  #DYNAMO
+  StudentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Student
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ID
+          AttributeType: S
+        - AttributeName: Email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ID
+          KeyType: HASH
+        - AttributeName: Email
+          KeyType: RANGE
+
+Outputs:
+  AppsyncAuthenticationARN:
+    Description: AppsyncAuthentication Arn
+    Value: !GetAtt AppsyncAuthentication.Arn
+  Student:
+    Description: Student table created with this template
+    Value: !GetAtt StudentsTable.Arn
