@@ -90,6 +90,35 @@ Resources:
       TypeName: Query
       FieldName: getStudent
       DataSourceName: !GetAtt AppsyncAuthenticationDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "GetItem",
+          "key": {
+            "ID": $util.dynamodb.toDynamoDBJson($ctx.args.ID),
+            "Email": $util.dynamodb.toDynamoDBJson($ctx.args.Email),
+          },
+        }
+      ResponseMappingTemplate: >
+        $util.toJson($context.result)
+
+  AppsyncAuthenticationResolverList:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt AppsyncAuthentication.ApiId
+      TypeName: Query
+      FieldName: listStudents
+      DataSourceName: !GetAtt AppsyncAuthenticationDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "Scan",
+          "filter": #if($context.args.filter) $util.transform.toDynamoDBFilterExpression($ctx.args.filter) #else null #end,
+          "limit": $util.defaultIfNull($ctx.args.limit, 20),
+          "nextToken": $util.toJson($util.defaultIfNullOrEmpty($ctx.args.nextToken, null)),
+        }
+      ResponseMappingTemplate: >
+        $util.toJson($context.result)
 
   # TODO: CONTINUAR NO REQUESTMAPPINGTEMPLATE XDDDDD
 
