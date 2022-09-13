@@ -68,12 +68,12 @@ Resources:
       ApiId: !GetAtt AppsyncAuthentication.ApiId
       Definition: |
         type Query {
-          getStudent(ID: String!, Email: String!): Student
+          getStudent(ID: ID!, Email: String): Student
           listStudents(limit: Int): StudentConnection
         }
         type Student {
-          Email: String!
-          ID: String!
+          Email: String
+          ID: ID!
         }
         type StudentConnection {
           items: [Student]
@@ -120,8 +120,6 @@ Resources:
       ResponseMappingTemplate: >
         $util.toJson($context.result)
 
-  # TODO: CONTINUAR NO REQUESTMAPPINGTEMPLATE XDDDDD
-
   #DYNAMO
   StudentsTable:
     Type: AWS::DynamoDB::Table
@@ -138,6 +136,18 @@ Resources:
           KeyType: HASH
         - AttributeName: Email
           KeyType: RANGE
+
+  #LAMBDA
+  AppsyncAuthenticationFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: appsync_authentication/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          ApiKey: !GetAtt AppsyncAuthenticationApiKey.ApiKey
+          ApiUrl: !GetAtt AppsyncAuthentication.GraphQLUrl
 
 Outputs:
   AppsyncAuthenticationARN:
