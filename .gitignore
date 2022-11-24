@@ -245,3 +245,5 @@ $RECYCLE.BIN/
 samconfig.toml
 event.json
 deps
+*.sh
+requests.py
