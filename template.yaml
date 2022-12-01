@@ -10,7 +10,7 @@ Parameters:
     Description: Region-Name
 
 Resources:
-  #ROLE StudentsGQL
+  #ROLE SchoolGQL
   AppsyncAuthenticationDynamoDBRole:
     Type: AWS::IAM::Role
     Properties:
@@ -30,13 +30,23 @@ Resources:
             Statement:
               - Effect: "Allow"
                 Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:Query
-                  - dynamodb:Scan
+                - "dynamodb:PutItem"
+                - "dynamodb:UpdateItem"
+                - "dynamodb:DeleteItem"
+                - "dynamodb:BatchWriteItem"
+                - "dynamodb:GetItem"
+                - "dynamodb:BatchGetItem"
+                - "dynamodb:Scan"
+                - "dynamodb:Query"
+                - "dynamodb:ConditionCheckItem"
                 Resource: 
+                  - !GetAtt SubjectsTable.Arn
                   - !GetAtt StudentsTable.Arn
+                  - !Join
+                    - "/"
+                    -
+                      - !GetAtt StudentsTable.Arn
+                      - "index/*"
 
   AWSAppSyncPushToCloudWatchLogsRole:
     Type: AWS::IAM::Role
@@ -64,43 +74,36 @@ Resources:
                   - "*"
 
   #APPSYNC
-  StudentsGQL:
+  SchoolGQL:
     Type: AWS::AppSync::GraphQLApi
     Properties:
       AuthenticationType: AWS_IAM
-      Name: StudentsGQL
+      Name: SchoolGQL
       LogConfig:
         CloudWatchLogsRoleArn: !GetAtt AWSAppSyncPushToCloudWatchLogsRole.Arn
         FieldLogLevel: ALL
-  
-  StudentsAPIDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt StudentsGQL.ApiId
-      Name: !Ref StudentsTable
-      Type: AMAZON_DYNAMODB
-      ServiceRoleArn: !GetAtt AppsyncAuthenticationDynamoDBRole.Arn
-      DynamoDBConfig:
-        AwsRegion: !Ref Region
-        TableName: !Ref StudentsTable
 
-  StudentsAPISchema:
+  SchoolAPISchema:
     Type: AWS::AppSync::GraphQLSchema
     Properties: 
-      ApiId: !GetAtt StudentsGQL.ApiId
+      ApiId: !GetAtt SchoolGQL.ApiId
       Definition: |
         type Mutation @aws_iam {
-          addStudent(ID: ID!, input: StudentInput): Student
-          updateStudent(ID: ID!, input: StudentInput): Student
+          addStudent(StudentId: ID!, input: StudentInput): Student
+          updateStudent(StudentId: ID!, input: StudentInputUpdate): Student
+          deleteStudent(StudentId: ID!): Student
+          addSubject(SubjectId: ID!, input: SubjectInput): Subject
+          updateSubject(SubjectId: ID!, input: SubjectInputUpdate): Subject
+          deleteSubject(SubjectId: ID!): Subject
         }
 
         type Query @aws_iam {
-          getStudent(ID: ID!): Student
+          getStudent(StudentId: ID!): Student
           getStudentByEmail(Email: String!): Student
         }
 
         type Student @aws_iam {
-          ID: ID
+          StudentId: ID
           __typename: String
           FullName: String
           Active: Boolean
@@ -110,20 +113,58 @@ Resources:
           CreatedAt: AWSDateTime
           ModifiedAt: AWSDateTime
           Phone: String
-        }
-
-        type StudentConnection @aws_iam {
-          items: [Student]
-          nextToken: String
+          Subject: Subject
         }
 
         input StudentInput @aws_iam {
-          FullName: String!
+          FullName: String
           Active: Boolean!
+          Age: String
+          AgeSchool: String
+          Email: String!
+          Phone: String
+          SubjectId: ID
+        }
+
+        input StudentInputUpdate @aws_iam {
+          FullName: String
+          Active: Boolean
           Age: String
           AgeSchool: String
           Email: String
           Phone: String
+          SubjectId: ID
+        }
+
+        type Subject @aws_iam {
+          SubjectId: ID
+          __typename: String
+          Mathematics: String
+          English: String         
+          History: String
+          Geography: String
+          Physics: String
+          Chemistry: String
+          CreatedAt: AWSDateTime
+          ModifiedAt: AWSDateTime
+        }
+
+        input SubjectInput @aws_iam {
+          Mathematics: String
+          English: String         
+          History: String
+          Geography: String
+          Physics: String
+          Chemistry: String
+        }
+        
+        input SubjectInputUpdate @aws_iam {
+          Mathematics: String
+          English: String         
+          History: String
+          Geography: String
+          Physics: String
+          Chemistry: String
         }
 
         schema {
@@ -131,11 +172,26 @@ Resources:
           mutation: Mutation
         }
 
+  ###################################
+  ############# STUDENT #############
+  ###################################
+
+  StudentsAPIDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt SchoolGQL.ApiId
+      Name: !Ref StudentsTable
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt AppsyncAuthenticationDynamoDBRole.Arn
+      DynamoDBConfig:
+        AwsRegion: !Ref Region
+        TableName: !Ref StudentsTable
+
   getStudentResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: StudentsAPISchema
+    DependsOn: SchoolAPISchema
     Properties:
-      ApiId: !GetAtt StudentsGQL.ApiId
+      ApiId: !GetAtt SchoolGQL.ApiId
       TypeName: Query
       FieldName: getStudent
       DataSourceName: !GetAtt StudentsAPIDataSource.Name
@@ -144,17 +200,54 @@ Resources:
           "version": "2017-02-28",
           "operation": "GetItem",
           "key": {
-            "ID": $util.dynamodb.toDynamoDBJson($ctx.args.ID),
+            "StudentId": $util.dynamodb.toDynamoDBJson($ctx.args.StudentId),
           },
         }
       ResponseMappingTemplate: >
-        $util.toJson($context.result)
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #else
+          $util.toJson($context.result)
+        #end
+
+  getStudentByEmailResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: SchoolAPISchema
+    Properties:
+      ApiId: !GetAtt SchoolGQL.ApiId
+      TypeName: Query
+      FieldName: getStudentByEmail
+      DataSourceName: !GetAtt StudentsAPIDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "Query",
+          "index" : "Email",
+          "query" : {
+              "expression" : "Email = :Email",
+              "expressionValues" : {
+                  ":Email" : $util.dynamodb.toDynamoDBJson($ctx.args.Email),
+              }
+          },
+          #if( ${context.arguments.count} )
+              ,"limit": $util.toJson($context.arguments.count)
+          #end
+          #if( ${context.arguments.nextToken} )
+              ,"nextToken": "${context.arguments.nextToken}"
+          #end
+        }
+      ResponseMappingTemplate: >
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #else
+          $util.toJson($context.result.items[0])
+        #end
 
   updateStudentResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: StudentsAPISchema
+    DependsOn: SchoolAPISchema
     Properties:
-      ApiId: !GetAtt StudentsGQL.ApiId
+      ApiId: !GetAtt SchoolGQL.ApiId
       TypeName: Mutation
       FieldName: updateStudent
       DataSourceName: !GetAtt StudentsAPIDataSource.Name
@@ -163,7 +256,7 @@ Resources:
           "version": "2017-02-28",
           "operation": "UpdateItem",
           "key": {
-            "ID": $util.dynamodb.toDynamoDBJson($ctx.args.ID),
+            "StudentId": $util.dynamodb.toDynamoDBJson($ctx.args.StudentId),
           },
           ## Set up some space to keep track of things we're updating **
           #set( $expNames  = {} )
@@ -174,7 +267,7 @@ Resources:
           #set( $ModifiedAt = $util.time.nowISO8601() )
           $util.qr( $ctx.args.input.put("ModifiedAt", $ModifiedAt) )
           ## Iterate through each argument, skipping keys **
-          #foreach( $entry in $util.map.copyAndRemoveAllKeys($ctx.args.input, ["ID"]).entrySet() )
+          #foreach( $entry in $util.map.copyAndRemoveAllKeys($ctx.args.input, ["StudentId"]).entrySet() )
             #if( $util.isNull($entry.value) )
               ## If the argument is set to "null", then remove that attribute from the item in DynamoDB **
               #set( $discard = ${expRemove.add("#${entry.key}")} )
@@ -228,11 +321,8 @@ Resources:
             #end
           },
           "condition": {
-            "expression": "attribute_exists(#ID)",
-            "expressionNames": {
-              "#ID": "ID",
-            },
-          }
+            "expression": "attribute_exists(StudentId)"
+          },
         }
       ResponseMappingTemplate: >
         #if($ctx.error)
@@ -241,11 +331,11 @@ Resources:
           $util.toJson($context.result)
         #end
 
-  addStudentsResolver:
+  addStudentResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: StudentsAPISchema
+    DependsOn: SchoolAPISchema
     Properties:
-      ApiId: !GetAtt StudentsGQL.ApiId
+      ApiId: !GetAtt SchoolGQL.ApiId
       TypeName: Mutation
       FieldName: addStudent
       DataSourceName: !GetAtt StudentsAPIDataSource.Name
@@ -254,9 +344,8 @@ Resources:
           "version" : "2018-05-29",
           "operation" : "PutItem",
           "key" : {
-              "ID" : $util.dynamodb.toDynamoDBJson($context.arguments.ID)
+              "StudentId" : $util.dynamodb.toDynamoDBJson($ctx.args.StudentId)
           },
-          
           #set( $map = $util.defaultIfNull($ctx.args.input, {}) )
           #set( $datetimenow = $util.time.nowISO8601())
           $util.qr($map.put("__typename", "Students"))
@@ -264,7 +353,7 @@ Resources:
           $util.qr($map.put("ModifiedAt", $datetimenow))
           "attributeValues" : $util.dynamodb.toMapValuesJson($map),
           "condition" : {
-              "expression" : "attribute_not_exists(ID)"
+              "expression" : "attribute_not_exists(StudentId)"
           },
         }
 
@@ -275,33 +364,265 @@ Resources:
           $util.toJson($context.result)
         #end
 
+  deleteStudentResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: SchoolAPISchema
+    Properties:
+      ApiId: !GetAtt SchoolGQL.ApiId
+      TypeName: Mutation
+      FieldName: deleteStudent
+      DataSourceName: !GetAtt StudentsAPIDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "DeleteItem",
+          "key": {
+            "StudentId": $util.dynamodb.toDynamoDBJson($ctx.args.StudentId),
+          },
+          "condition" : {
+            "expression" : "attribute_exists(StudentId)"
+          },
+        }
+      ResponseMappingTemplate: >
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #else
+          $util.toJson($context.result)
+        #end
+        
 
-  #DYNAMO
+  ###################################
+  ############# SUBJECTS ############
+  ###################################
+
+  SubjectsAPIDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt SchoolGQL.ApiId
+      Name: !Ref SubjectsTable
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt AppsyncAuthenticationDynamoDBRole.Arn
+      DynamoDBConfig:
+        AwsRegion: !Ref Region
+        TableName: !Ref SubjectsTable
+
+  addSubjectResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: SchoolAPISchema
+    Properties:
+      ApiId: !GetAtt SchoolGQL.ApiId
+      TypeName: Mutation
+      FieldName: addSubject
+      DataSourceName: !GetAtt SubjectsAPIDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version" : "2018-05-29",
+          "operation" : "PutItem",
+          "key" : {
+              "SubjectId" : $util.dynamodb.toDynamoDBJson($ctx.args.SubjectId),
+          },
+          #set( $map = $util.defaultIfNull($ctx.args.input, {}) )
+          #set( $datetimenow = $util.time.nowISO8601())
+          $util.qr($map.put("__typename", "Subjects"))
+          $util.qr($map.put("CreatedAt", $datetimenow))
+          $util.qr($map.put("ModifiedAt", $datetimenow))
+          "attributeValues" : $util.dynamodb.toMapValuesJson($map),
+          "condition" : {
+              "expression" : "attribute_not_exists(SubjectId)"
+          },
+        }
+
+      ResponseMappingTemplate: >
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #else
+          $util.toJson($context.result)
+        #end
+
+  updateSubjectResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: SchoolAPISchema
+    Properties:
+      ApiId: !GetAtt SchoolGQL.ApiId
+      TypeName: Mutation
+      FieldName: updateSubject
+      DataSourceName: !GetAtt SubjectsAPIDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "UpdateItem",
+          "key": {
+            "SubjectId": $util.dynamodb.toDynamoDBJson($ctx.args.SubjectId),
+          },
+          ## Set up some space to keep track of things we're updating **
+          #set( $expNames  = {} )
+          #set( $expValues = {} )
+          #set( $expSet = {} )
+          #set( $expAdd = {} )
+          #set( $expRemove = [] )
+          #set( $ModifiedAt = $util.time.nowISO8601() )
+          $util.qr( $ctx.args.input.put("ModifiedAt", $ModifiedAt) )
+          ## Iterate through each argument, skipping keys **
+          #foreach( $entry in $util.map.copyAndRemoveAllKeys($ctx.args.input, ["SubjectId"]).entrySet() )
+            #if( $util.isNull($entry.value) )
+              ## If the argument is set to "null", then remove that attribute from the item in DynamoDB **
+              #set( $discard = ${expRemove.add("#${entry.key}")} )
+              $!{expNames.put("#${entry.key}", "${entry.key}")}
+            #else
+              ## Otherwise set (or update) the attribute on the item in DynamoDB **
+              $!{expSet.put("#${entry.key}", ":${entry.key}")}
+              $!{expNames.put("#${entry.key}", "${entry.key}")}
+              $!{expValues.put(":${entry.key}", $util.dynamodb.toDynamoDB($entry.value))}
+            #end
+          #end
+          ## Start building the update expression, starting with attributes we're going to SET **
+          #set( $expression = "" )
+          #if( !${expSet.isEmpty()} )
+            #set( $expression = "SET" )
+            #foreach( $entry in $expSet.entrySet() )
+              #set( $expression = "${expression} ${entry.key} = ${entry.value}" )
+              #if ( $foreach.hasNext )
+                #set( $expression = "${expression}," )
+              #end
+            #end
+          #end
+          ## Continue building the update expression, adding attributes we're going to ADD **
+          #if( !${expAdd.isEmpty()} )
+            #set( $expression = "${expression} ADD" )
+            #foreach( $entry in $expAdd.entrySet() )
+              #set( $expression = "${expression} ${entry.key} ${entry.value}" )
+              #if ( $foreach.hasNext )
+                #set( $expression = "${expression}," )
+              #end
+            #end
+          #end
+          ## Continue building the update expression, adding attributes we're going to REMOVE **
+          #if( !${expRemove.isEmpty()} )
+            #set( $expression = "${expression} REMOVE" )
+            #foreach( $entry in $expRemove )
+              #set( $expression = "${expression} ${entry}" )
+              #if ( $foreach.hasNext )
+                #set( $expression = "${expression}," )
+              #end
+            #end
+          #end
+          ## Finally, write the update expression into the document, along with any expressionNames and expressionValues **
+          "update": {
+            "expression": "${expression}",
+            #if( !${expNames.isEmpty()} )
+              "expressionNames": $utils.toJson($expNames),
+            #end
+            #if( !${expValues.isEmpty()} )
+              "expressionValues": $utils.toJson($expValues),
+            #end
+          },
+          "condition": {
+            "expression": "attribute_exists(SubjectId)"
+          },
+        }
+      ResponseMappingTemplate: >
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #else
+          $util.toJson($context.result)
+        #end
+        
+  deleteSubjectResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: SchoolAPISchema
+    Properties:
+      ApiId: !GetAtt SchoolGQL.ApiId
+      TypeName: Mutation
+      FieldName: deleteSubject
+      DataSourceName: !GetAtt SubjectsAPIDataSource.Name
+      RequestMappingTemplate: >
+        {
+          "version": "2017-02-28",
+          "operation": "DeleteItem",
+          "key": {
+            "SubjectId": $util.dynamodb.toDynamoDBJson($ctx.args.SubjectId),
+          },
+          "condition" : {
+            "expression" : "attribute_exists(SubjectId)"
+          },
+        }
+      ResponseMappingTemplate: >
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #else
+          $util.toJson($context.result)
+        #end
+
+  #NESTED RESOLVERS
+  StudentsSubjectsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: SchoolAPISchema
+    Properties:
+      ApiId: !GetAtt SchoolGQL.ApiId
+      TypeName: Student
+      FieldName: Subject
+      DataSourceName: !GetAtt SubjectsAPIDataSource.Name
+      RequestMappingTemplate: >
+        #if ($util.isNullOrEmpty($ctx.source.SubjectId))
+          #return
+        #end
+        {
+          "version": "2017-02-28",
+          "operation": "GetItem",
+          "key": {
+            "SubjectId": $util.dynamodb.toDynamoDBJson($ctx.source.SubjectId),
+          },
+        }
+      ResponseMappingTemplate: >
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #else
+          $util.toJson($context.result)
+        #end
+
+  #DYNAMOOO
   StudentsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: Student
+      TableName: StudentTable
       BillingMode: PAY_PER_REQUEST
       KeySchema:
-        - AttributeName: ID
+        - AttributeName: StudentId
           KeyType: HASH
       AttributeDefinitions:
-        - AttributeName: ID
+        - AttributeName: StudentId
           AttributeType: S
         - AttributeName: Email
-          AttributeType: S
-        - AttributeName: FullName
           AttributeType: S
       GlobalSecondaryIndexes:
         - IndexName: Email
           KeySchema:
             - AttributeName: Email
               KeyType: HASH
+            - AttributeName: StudentId
+              KeyType: RANGE
           Projection:
             ProjectionType: ALL
-        - IndexName: FullName
+      StreamSpecification:
+         StreamViewType: NEW_AND_OLD_IMAGES
+
+  SubjectsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: SubjectsTable
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: SubjectId
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: SubjectId
+          AttributeType: S
+        - AttributeName: StudentId
+          AttributeType: S
+      GlobalSecondaryIndexes:
+        - IndexName: StudentId
           KeySchema:
-            - AttributeName: FullName
+            - AttributeName: StudentId
               KeyType: HASH
           Projection:
             ProjectionType: ALL
@@ -309,20 +630,31 @@ Resources:
 
 
   #LAMBDA
-  AppsyncAuthenticationFunction:
+  studentFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
       CodeUri: appsync_authentication/
-      Handler: app.lambda_handler
+      Handler: studentFunction.lambda_handler
       Runtime: python3.9
       Environment:
         Variables:
-          ApiUrl: !GetAtt StudentsGQL.GraphQLUrl
+          ApiUrl: !GetAtt SchoolGQL.GraphQLUrl
+      Events:
+        TableStudents:
+          Type: DynamoDB
+          Properties:
+            StartingPosition: TRIM_HORIZON
+            Stream: !GetAtt StudentsTable.StreamArn
+            FilterCriteria:
+              Filters:
+                - Pattern: '{"eventName": ["INSERT"], "dynamodb" : {"NewImage": {"Active" : {"BOOL": [true, false] } } } }'
+                - Pattern: '{"eventName": ["MODIFY"], "dynamodb" : {"NewImage": {"Active" : {"BOOL": [true, false] } }, "OldImage": {"Active" : {"BOOL": [true, false] } } } }'
+                - Pattern: '{"eventName": ["REMOVE"], "dynamodb" : {"OldImage": {"Active" : {"BOOL": [true, false] } } } }'
 
 Outputs:
   AppsyncAuthenticationARN:
-    Description: StudentsGQL Arn
-    Value: !GetAtt StudentsGQL.Arn
-  Student:
-    Description: Student table created with this template
-    Value: !GetAtt StudentsTable.Arn
+    Description: SchoolGQL Arn
+    Value: !GetAtt SchoolGQL.Arn
+  # Student:
+  #   Description: Student table created with this template
+  #   Value: !GetAtt StudentsTable.Arn
