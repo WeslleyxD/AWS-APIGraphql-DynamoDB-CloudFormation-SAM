@@ -33,12 +33,8 @@ Resources:
                 - "dynamodb:PutItem"
                 - "dynamodb:UpdateItem"
                 - "dynamodb:DeleteItem"
-                - "dynamodb:BatchWriteItem"
                 - "dynamodb:GetItem"
-                - "dynamodb:BatchGetItem"
-                - "dynamodb:Scan"
                 - "dynamodb:Query"
-                - "dynamodb:ConditionCheckItem"
                 Resource: 
                   - !GetAtt SubjectsTable.Arn
                   - !GetAtt StudentsTable.Arn
@@ -631,7 +627,7 @@ Resources:
 
   #LAMBDA
   studentFunction:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Type: AWS::Serverless::Function
     Properties:
       CodeUri: appsync_authentication/
       Handler: studentFunction.lambda_handler
@@ -652,9 +648,6 @@ Resources:
                 - Pattern: '{"eventName": ["REMOVE"], "dynamodb" : {"OldImage": {"Active" : {"BOOL": [true, false] } } } }'
 
 Outputs:
-  AppsyncAuthenticationARN:
+  studentFunction:
     Description: SchoolGQL Arn
     Value: !GetAtt SchoolGQL.Arn
-  # Student:
-  #   Description: Student table created with this template
-  #   Value: !GetAtt StudentsTable.Arn
