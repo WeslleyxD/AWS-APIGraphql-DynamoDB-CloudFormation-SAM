@@ -4,8 +4,9 @@
 - Autenticação por IAM
 - CRUD nas tabelas Students e Subjects
 - DynamoDB Streams para log de alterações nas tabelas
-- Gatilho pro Lambda quando Stream gera log
+- Gatilho pro Lambda quando DynamoDB Stream gera log
 - Nested Resolvers
+- Custom Resolvers com VTL
 
 ## - Serviços Utilizados
 - AppSync
