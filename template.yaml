@@ -203,6 +203,12 @@ Resources:
         #if($ctx.error)
           $util.error($ctx.error.message, $ctx.error.type)
         #else
+          #set( $attributes =  ["StudentId", "__typename", "FullName", "Active", "Age", "AgeSchool", "Email", "CreatedAt", "ModifiedAt", "Phone", "Subject"] )
+          #foreach ( $attribute in $attributes )
+            #if ( !$context.result.containsKey($attribute) )
+              $util.qr($ctx.result.put($attribute, ""))
+            #end
+          #end
           $util.toJson($context.result)
         #end
 
