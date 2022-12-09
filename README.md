@@ -10,6 +10,7 @@
 
 ## - Serviços Utilizados
 - AppSync
+- Lambda
 - DynamoDB
 - SAM
 - Cloud Formation
