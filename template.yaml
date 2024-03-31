@@ -637,7 +637,7 @@ Resources:
     Properties:
       CodeUri: appsync_authentication/
       Handler: studentFunction.lambda_handler
-      Runtime: python3.9
+      Runtime: python3.10
       Environment:
         Variables:
           ApiUrl: !GetAtt SchoolGQL.GraphQLUrl
